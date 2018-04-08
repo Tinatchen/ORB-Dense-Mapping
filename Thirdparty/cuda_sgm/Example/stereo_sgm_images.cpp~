@@ -1,0 +1,180 @@
+/*
+Copyright 2016 fixstars
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http ://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+#include <stdlib.h>
+#include <iostream>
+
+#include <opencv2/core/core.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/core/version.hpp>
+#if CV_MAJOR_VERSION == 2
+#include <opencv2/contrib/contrib.hpp>
+#endif
+#include "fstream"
+#include <libsgm.h>
+#include<iomanip>
+#include <chrono>
+
+using namespace std;
+
+void LoadImages(const string &strPathLeft, const string &strPathRight, const string &strPathTimes,
+				vector<string> &vstrImageLeft, vector<string> &vstrImageRight, vector<double> &vTimeStamps);
+
+int main(int argc, char* argv[]) {
+	if (argc < 4) {
+		std::cerr << "usage: stereosgm path_to_settings left_img_path right_img_path [disp_size]" << std::endl;
+		std::exit(EXIT_FAILURE);
+	}
+
+	vector<string> vstrImageLeft;
+	vector<string> vstrImageRight;
+	vector<double> vTimeStamp;
+	LoadImages(string(argv[2]), string(argv[3]), string(argv[4]), vstrImageLeft, vstrImageRight, vTimeStamp);
+
+	if (vstrImageLeft.empty() || vstrImageRight.empty()) {
+		cerr << "ERROR: No images in provided path." << endl;
+		return 1;
+	}
+
+	if (vstrImageLeft.size() != vstrImageRight.size()) {
+		cerr << "ERROR: Different number of left and right images." << endl;
+		return 1;
+	}
+
+
+	// Read rectification parameters
+	cv::FileStorage fsSettings(argv[1], cv::FileStorage::READ);
+	if (!fsSettings.isOpened()) {
+		cerr << "ERROR: Wrong path to settings" << endl;
+		return -1;
+	}
+
+	cv::Mat K_l, K_r, P_l, P_r, R_l, R_r, D_l, D_r;
+	fsSettings["LEFT.K"] >> K_l;
+	fsSettings["RIGHT.K"] >> K_r;
+
+	fsSettings["LEFT.P"] >> P_l;
+	fsSettings["RIGHT.P"] >> P_r;
+
+	fsSettings["LEFT.R"] >> R_l;
+	fsSettings["RIGHT.R"] >> R_r;
+
+	fsSettings["LEFT.D"] >> D_l;
+	fsSettings["RIGHT.D"] >> D_r;
+
+	int rows_l = fsSettings["LEFT.height"];
+	int cols_l = fsSettings["LEFT.width"];
+	int rows_r = fsSettings["RIGHT.height"];
+	int cols_r = fsSettings["RIGHT.width"];
+
+	if (K_l.empty() || K_r.empty() || P_l.empty() || P_r.empty() || R_l.empty() || R_r.empty() || D_l.empty() ||
+		D_r.empty() ||
+		rows_l == 0 || rows_r == 0 || cols_l == 0 || cols_r == 0) {
+		cerr << "ERROR: Calibration parameters to rectify stereo are missing!" << endl;
+		return -1;
+	}
+
+	cv::Mat M1l, M2l, M1r, M2r;
+	cv::initUndistortRectifyMap(K_l, D_l, R_l, P_l.rowRange(0, 3).colRange(0, 3), cv::Size(cols_l, rows_l), CV_32F, M1l,
+								M2l);
+	cv::initUndistortRectifyMap(K_r, D_r, R_r, P_r.rowRange(0, 3).colRange(0, 3), cv::Size(cols_r, rows_r), CV_32F, M1r,
+								M2r);
+
+
+	const int nImages = vstrImageLeft.size();
+
+	for (int ni = 0; ni < nImages ; ++ni) {
+//		std::cout << vstrImageLeft[ni] << std::endl;
+		cv::Mat imLeft = cv::imread(vstrImageLeft[ni], 0);
+		cv::Mat imRight = cv::imread(vstrImageRight[ni], 0);
+
+		cv::Mat left, right;
+		cv::remap(imLeft,left,M1l,M2l,cv::INTER_LINEAR);
+		cv::remap(imRight,right,M1r,M2r,cv::INTER_LINEAR);
+
+		std::chrono::monotonic_clock::time_point t1 = std::chrono::steady_clock::now();
+
+		int disp_size = 64;
+//		if (argc >= 4) {
+//			disp_size = atoi(argv[3]);
+//		}
+
+		if (left.size() != right.size() || left.type() != right.type()) {
+			std::cerr << "mismatch input image size" << std::endl;
+			std::exit(EXIT_FAILURE);
+		}
+
+		int bits = 0;
+
+		switch (left.type()) {
+			case CV_8UC1:
+				bits = 8;
+				break;
+			case CV_16UC1:
+				bits = 16;
+				break;
+			default:
+				std::cerr << "invalid input image color format" << left.type() << std::endl;
+				std::exit(EXIT_FAILURE);
+		}
+
+
+
+		sgm::StereoSGM ssgm(left.cols, left.rows, disp_size, bits, 8, sgm::EXECUTE_INOUT_HOST2HOST);
+
+		cv::Mat output(cv::Size(left.cols, left.rows), CV_8UC1);
+
+		ssgm.execute(left.data, right.data, (void **) &output.data);
+		std::chrono::monotonic_clock::time_point t2 = std::chrono::steady_clock::now();
+		double ttrack= std::chrono::duration_cast<std::chrono::duration<double> >(t2 - t1).count();
+		std::cout << ttrack << "ms" << std::endl;
+		// show image
+//		cv::imshow("image", output * 256 / disp_size);
+
+//		int key = cv::waitKey(10);
+
+	}
+}
+
+
+
+
+void LoadImages(const string &strPathLeft, const string &strPathRight, const string &strPathTimes,
+        vector<string> &vstrImageLeft, vector<string> &vstrImageRight, vector<double> &vTimeStamps) {
+        ifstream fTimes;
+        fTimes.open(strPathTimes.c_str());
+        vTimeStamps.reserve(5000);
+        vstrImageLeft.reserve(5000);
+        vstrImageRight.reserve(5000);
+        while (!fTimes.eof()) {
+            string s;
+            getline(fTimes, s);
+            if (!s.empty()) {
+                stringstream ss;
+                ss << s;
+                vstrImageLeft.push_back(strPathLeft + "/" + ss.str() + ".png");
+                vstrImageRight.push_back(strPathRight + "/" + ss.str() + ".png");
+                double t;
+                ss >> t;
+                vTimeStamps.push_back(t / 1e9);
+
+
+            }
+
+        }
+
+}

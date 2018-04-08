@@ -1,3 +1,15 @@
+tools/bin_vocabulary
+.idea
+cmake-build-debug
+CameraTrajectory.txt
+KeyFrameTrajectory.txt
+*.pcd
+*.ply
+InlierRate.txt
+Vocabulary
+bin
+*.ot
+*build
 # Prerequisites
 *.d
 

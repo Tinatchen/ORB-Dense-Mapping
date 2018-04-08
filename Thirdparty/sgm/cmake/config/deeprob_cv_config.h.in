@@ -1,0 +1,26 @@
+#ifndef DEEPROB_CV_CONFIG_H_IN_
+#define DEEPROB_CV_CONFIG_H_IN_
+
+#define DEEPROB_CV_VERSION_MAJOR @DEEPROB_CV_VERSION_MAJOR@
+#define DEEPROB_CV_VERSION_MINOR @DEEPROB_CV_VERSION_MINOR@
+//#cmakedefine USE_EIGEN
+#cmakedefine USE_SSE2
+#cmakedefine USE_SSE3
+#cmakedefine USE_SSSE3
+#cmakedefine USE_SSE4_1
+#cmakedefine USE_SSE4_2
+
+#ifdef USE_EIGEN
+#include "Eigen/Dense"
+#include "Eigen/SVD"
+#endif
+
+#ifdef USE_SSE2
+#include <emmintrin.h>
+#endif
+
+#ifndef _DEBUG
+#include <omp.h>
+#endif
+
+#endif // DEEPROB_CV_CONFIG_H_IN_
